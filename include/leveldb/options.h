@@ -140,6 +140,13 @@ struct LEVELDB_EXPORT Options {
   // Many applications will benefit from passing the result of
   // NewBloomFilterPolicy() here.
   const FilterPolicy* filter_policy = nullptr;
+
+  // Leveldb will wirte hot data in ssd, and will write cold data in hdd
+  // if shot_cold_separation is true, sd_path and hdd_path must both have values 
+  // if shot_cold_separation is false, db will behave as the original Leveldb
+  bool hot_cold_separation = false;
+  std::string ssd_path;
+  std::string hdd_path;
 };
 
 // Options that control read operations

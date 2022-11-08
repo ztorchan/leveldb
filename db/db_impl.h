@@ -162,7 +162,7 @@ class DBImpl : public DB {
   const Options options_;  // options_.comparator == &internal_comparator_
   const bool owns_info_log_;
   const bool owns_cache_;
-  const std::string dbname_;
+  std::string dbname_;
 
   // table_cache_ provides its own synchronization
   TableCache* const table_cache_;
@@ -203,6 +203,10 @@ class DBImpl : public DB {
   Status bg_error_ GUARDED_BY(mutex_);
 
   CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+
+  bool hot_cold_separation_;
+  std::string ssd_path_;
+  std::string hdd_path_;
 };
 
 // Sanitize db options.  The caller should delete result.info_log if

@@ -147,7 +147,14 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       background_compaction_scheduled_(false),
       manual_compaction_(nullptr),
       versions_(new VersionSet(dbname_, &options_, table_cache_,
-                               &internal_comparator_)) {}
+                               &internal_comparator_)),
+      hot_cold_separation_(raw_options.hot_cold_separation),
+      ssd_path_(raw_options.ssd_path),
+      hdd_path_(raw_options.hdd_path) {
+        if (hot_cold_separation_) {
+          dbname_ = ssd_path_;
+        }
+      }
 
 DBImpl::~DBImpl() {
   // Wait for background work to finish.
@@ -1483,6 +1490,9 @@ DB::~DB() = default;
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 
+  if (options.hot_cold_separation && (options.ssd_path.empty() || options.hdd_path.empty())) {
+    return Status::InvalidArgument("");
+  }
   DBImpl* impl = new DBImpl(options, dbname);
   impl->mutex_.Lock();
   VersionEdit edit;
