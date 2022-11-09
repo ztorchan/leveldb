@@ -75,6 +75,53 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
   return s;
 }
 
+Status TableCache::FindTableWithSeparation(uint64_t file_number, uint64_t file_size,
+                                           Cache::Handle** handle, int level) {
+  Status s;
+  char buf[sizeof(file_number)];
+  EncodeFixed64(buf, file_number);
+  Slice key(buf, sizeof(buf));
+  *handle = cache_->Lookup(key);
+  if (*handle == nullptr) {
+    std::string fname;
+    if (level <= 1) {
+      fname = TableFileName(options_.ssd_path, file_number);
+    } else {
+      fname = TableFileName(options_.hdd_path, file_number);
+    }
+    RandomAccessFile* file = nullptr;
+    Table* table = nullptr;
+    s = env_->NewRandomAccessFile(fname, &file);
+    if (!s.ok()) {
+      std::string old_fname;
+      if (level <= 1) {
+        old_fname = SSTTableFileName(options_.ssd_path, file_number);
+      } else {
+        old_fname = SSTTableFileName(options_.hdd_path, file_number);
+      }
+      if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
+        s = Status::OK();
+      }
+    }
+    if (s.ok()) {
+      s = Table::Open(options_, file, file_size, &table);
+    }
+
+    if (!s.ok()) {
+      assert(table == nullptr);
+      delete file;
+      // We do not cache error results so that if the error is transient,
+      // or somebody repairs the file, we recover automatically.
+    } else {
+      TableAndFile* tf = new TableAndFile;
+      tf->file = file;
+      tf->table = table;
+      *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
+    }
+  }
+  return s;
+}
+
 Iterator* TableCache::NewIterator(const ReadOptions& options,
                                   uint64_t file_number, uint64_t file_size,
                                   Table** tableptr) {
@@ -84,6 +131,28 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
 
   Cache::Handle* handle = nullptr;
   Status s = FindTable(file_number, file_size, &handle);
+  if (!s.ok()) {
+    return NewErrorIterator(s);
+  }
+
+  Table* table = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+  Iterator* result = table->NewIterator(options);
+  result->RegisterCleanup(&UnrefEntry, cache_, handle);
+  if (tableptr != nullptr) {
+    *tableptr = table;
+  }
+  return result;
+}
+
+Iterator* TableCache::NewIteratorWithSeparation(const ReadOptions& options,
+                                                uint64_t file_number, uint64_t file_size,
+                                                int level, Table** tableptr) {
+  if (tableptr != nullptr) {
+    *tableptr = nullptr;
+  }
+
+  Cache::Handle* handle = nullptr;
+  Status s = FindTableWithSeparation(file_number, file_size, &handle, level);
   if (!s.ok()) {
     return NewErrorIterator(s);
   }

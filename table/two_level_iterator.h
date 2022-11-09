@@ -26,6 +26,12 @@ Iterator* NewTwoLevelIterator(
                                 const Slice& index_value),
     void* arg, const ReadOptions& options);
 
+Iterator* NewTwoLevelIteratorWithSeparation(
+    Iterator* index_iter,
+    Iterator* (*block_function)(void* arg, const ReadOptions& options, 
+                                const Slice&, const int&), 
+    void* arg, const ReadOptions& options, const int& level);
+
 }  // namespace leveldb
 
 #endif  // STORAGE_LEVELDB_TABLE_TWO_LEVEL_ITERATOR_H_

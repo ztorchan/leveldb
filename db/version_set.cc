@@ -219,6 +219,18 @@ static Iterator* GetFileIterator(void* arg, const ReadOptions& options,
   }
 }
 
+static Iterator* GetFileIteratorWithSeparation(void* arg, const ReadOptions& options,
+                                               const Slice& file_value, const int& level) {
+  TableCache* cache = reinterpret_cast<TableCache*>(arg);
+  if (file_value.size() != 16) {
+    return NewErrorIterator(
+        Status::Corruption("FileReader invoked with unexpected value"));
+  } else {
+    return cache->NewIteratorWithSeparation(options, DecodeFixed64(file_value.data()),
+                                            DecodeFixed64(file_value.data() + 8), level);
+  }
+}
+
 Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
                                             int level) const {
   return NewTwoLevelIterator(
@@ -1232,14 +1244,22 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
       if (c->level() + which == 0) {
         const std::vector<FileMetaData*>& files = c->inputs_[which];
         for (size_t i = 0; i < files.size(); i++) {
-          list[num++] = table_cache_->NewIterator(options, files[i]->number,
-                                                  files[i]->file_size);
+          list[num++] = options_->hot_cold_separation ?
+                        table_cache_->NewIteratorWithSeparation(options, files[i]->number,
+                                                files[i]->file_size, c->level()) :
+                        table_cache_->NewIterator(options, files[i]->number,
+                                                files[i]->file_size);
+          
         }
       } else {
         // Create concatenating iterator for the files from this level
-        list[num++] = NewTwoLevelIterator(
-            new Version::LevelFileNumIterator(icmp_, &c->inputs_[which]),
-            &GetFileIterator, table_cache_, options);
+        list[num++] = options_->hot_cold_separation ? 
+                      NewTwoLevelIteratorWithSeparation(
+                        new Version::LevelFileNumIterator(icmp_, &c->inputs_[which]),
+                        &GetFileIteratorWithSeparation, table_cache_, options, c->level()) :
+                      NewTwoLevelIterator(
+                        new Version::LevelFileNumIterator(icmp_, &c->inputs_[which]),
+                        &GetFileIterator, table_cache_, options);
       }
     }
   }
