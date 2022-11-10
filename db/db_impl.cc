@@ -152,9 +152,6 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       hot_cold_separation_(raw_options.hot_cold_separation),
       ssd_path_(raw_options.ssd_path),
       hdd_path_(raw_options.hdd_path) {
-        if (hot_cold_separation_) {
-          dbname_ = ssd_path_;
-        }
       }
 
 DBImpl::~DBImpl() {
@@ -413,6 +410,9 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
   env_->CreateDir(dbname_);
+  if (hot_cold_separation_) {
+    env_->CreateDir(hdd_path_);
+  }
   assert(db_lock_ == nullptr);
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
   if (!s.ok()) {
@@ -692,9 +692,9 @@ Status DBImpl::WriteLevel0TableWithSeparation(MemTable* mem, VersionEdit* edit,
   {
     mutex_.Unlock();
     if (level <= 1) {
-      s = BuildTable(ssd_path_, env_, options_, table_cache_, iter, &meta);
+      s = BuildTableWithSeparation(ssd_path_, env_, options_, table_cache_, iter, &meta, level);
     } else {
-      s = BuildTable(hdd_path_, env_, options_, table_cache_, iter, &meta);
+      s = BuildTableWithSeparation(hdd_path_, env_, options_, table_cache_, iter, &meta, level);
     }
     mutex_.Lock();
   }
@@ -707,7 +707,6 @@ Status DBImpl::WriteLevel0TableWithSeparation(MemTable* mem, VersionEdit* edit,
 
   // Note that if file_size is zero, the file has been deleted and
   // should not be added to the manifest.
-  int level = 0;
   if (s.ok() && meta.file_size > 0) {
     edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
                   meta.largest);
@@ -1673,9 +1672,11 @@ DB::~DB() = default;
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 
-  if (options.hot_cold_separation && (options.ssd_path.empty() || options.hdd_path.empty())) {
-    return Status::InvalidArgument("");
+  if (options.hot_cold_separation) {
+    if (options.ssd_path.empty() || options.hdd_path.empty() || dbname != options.ssd_path)
+      return Status::InvalidArgument("");
   }
+
   DBImpl* impl = new DBImpl(options, dbname);
   impl->mutex_.Lock();
   VersionEdit edit;
